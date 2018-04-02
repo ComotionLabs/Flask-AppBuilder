@@ -1,5 +1,6 @@
 import datetime
 import logging
+import boto3
 from flask import url_for, g, session
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_login import LoginManager, current_user
@@ -19,7 +20,7 @@ from ..const import AUTH_OID, AUTH_DB, AUTH_LDAP, \
                     LOGMSG_WAR_SEC_NOLDAP_OBJ, \
                     LOGMSG_WAR_SEC_LOGIN_FAILED
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("SECURITY MANAGER")
 
 
 class AbstractSecurityManager(BaseManager):
@@ -163,6 +164,7 @@ class BaseSecurityManager(AbstractSecurityManager):
     permissionviewmodelview = PermissionViewModelView
 
     def __init__(self, appbuilder):
+        log.debug('initialise security manager')
         super(BaseSecurityManager, self).__init__(appbuilder)
         app = self.appbuilder.get_app
         # Base Security Config
@@ -194,11 +196,11 @@ class BaseSecurityManager(AbstractSecurityManager):
         if self.auth_type == AUTH_OAUTH:
             from flask_oauthlib.client import OAuth
             self.oauth = OAuth()
-            self.oauth_remotes = dict()
+            self.oauth_remotes = dict() 
             for _provider in self.oauth_providers:
                 provider_name = _provider['name']
                 log.debug("OAuth providers init {0}".format(provider_name))
-                obj_provider = self.oauth.remote_app(provider_name, **_provider['remote_app'])
+                obj_provider = self.oauth.remote_app(provider_name, **_provider['remote_app']) #returns OAuthRemoteApp
                 obj_provider._tokengetter = self.oauth_tokengetter
                 if not self.oauth_user_info:
                     self.oauth_user_info = self.get_oauth_user_info
@@ -355,6 +357,7 @@ class BaseSecurityManager(AbstractSecurityManager):
         """
             Set the current session with OAuth user secrets
         """
+        log.debug("oauth response from cognito: {0}".format(oauth_response))
         # Get this provider key names for token_key and token_secret
         token_key = self.appbuilder.sm.get_oauth_token_key_name(provider)
         token_secret = self.appbuilder.sm.get_oauth_token_secret_name(provider)
@@ -366,6 +369,8 @@ class BaseSecurityManager(AbstractSecurityManager):
         session['oauth_provider'] = provider
 
     def get_oauth_user_info(self, provider, resp=None):
+        log.debug("getting user info for oauth")
+        log.debug("provider: {0}".format(provider))
         """
             Since there are different OAuth API's with different ways to
             retrieve user info
@@ -375,6 +380,41 @@ class BaseSecurityManager(AbstractSecurityManager):
             me = self.appbuilder.sm.oauth_remotes[provider].get('user')
             log.debug("User info from Github: {0}".format(me.data))
             return {'username': "github_" + me.data.get('login')}
+        #for Cognito
+#        if provider == 'cognito':
+#            log.debug("provider: {0}".format(self.appbuilder.sm.oauth_remotes[provider]))
+#            log.debug("tokenkey: {0}".format(session.get('oauth')[0]))
+#            log.debug("tokenkey: {0}".format(session['oauth'][0]))
+#            data = {
+#                'grant_type' : 'client_credentials'
+##                'scope' : 'email profile'
+##                'client_id' : '
+#            }
+#            me = self.appbuilder.sm.oauth_remotes[provider].post('oauth2/token',data=data)
+#            log.debug("User info from Cognito: {0}".format(me.data))
+#            return {
+#                'username': "timalive",#me.data.get('username'),
+#                'email': "hello.2@gmail.com",#me.data.get('email'),
+#                'first_name': 'tim',
+#                'last_name' :'vieyra'
+#                 }
+        client = boto3.client('cognito-idp', region_name="eu-west-1")
+        token= AccessToken=session['oauth'][0]
+        log.debug("tring with access token: {0}".format(token))
+        response = client.get_user(
+            AccessToken=session['oauth'][0]
+        )
+        userattributes = response['UserAttributes']
+        log.debug("response from Cognito: {0}".format(response))
+        return {
+            'username' : response['Username'],
+            'first_name' : next(item for item in userattributes if item["Name"] == "name")['Value'],
+            'last_name' : next(item for item in userattributes if item["Name"] == "family_name")['Value'],
+            'email' : next(item for item in userattributes if item["Name"] == "email")['Value']
+            }
+
+    
+    
         # for twitter
         if provider == 'twitter':
             me = self.appbuilder.sm.oauth_remotes[provider].get('account/settings.json')
@@ -717,6 +757,7 @@ class BaseSecurityManager(AbstractSecurityManager):
             :userinfo: dict with user information the keys have the same name
             as User model columns.
         """
+        log.debug("user info to authorise: {0}: ".format(userinfo));
         if 'username' in userinfo:
             user = self.find_user(username=userinfo['username'])
         elif 'email' in userinfo:

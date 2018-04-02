@@ -1,6 +1,7 @@
 import re
 import datetime
 import logging
+import sys, traceback
 from flask import flash, redirect, session, url_for, request, g, make_response, jsonify, abort
 from werkzeug.security import generate_password_hash
 from wtforms import validators, PasswordField
@@ -18,7 +19,7 @@ from .forms import LoginForm_db, LoginForm_oid, ResetPasswordForm, UserInfoEdit
 from .decorators import has_access
 
 
-log = logging.getLogger(__name__)
+log = logging.getLogger('flask_oauthlib.views')
 
 
 class PermissionModelView(ModelView):
@@ -518,6 +519,7 @@ class AuthOAuthView(AuthView):
         log.debug("Authorized init")
         resp = self.appbuilder.sm.oauth_remotes[provider].authorized_response()
         if resp is None:
+            log.debug('No OAUTH Response: {0}'.format(resp))
             flash(u'You denied the request to sign in.', 'warning')
             return redirect('login')
         log.debug('OAUTH Authorized resp: {0}'.format(resp))
@@ -526,6 +528,7 @@ class AuthOAuthView(AuthView):
             self.appbuilder.sm.set_oauth_session(provider, resp)
             userinfo = self.appbuilder.sm.oauth_user_info(provider)
         except Exception as e:
+            log.debug(traceback.format_exc());
             log.error("Error returning OAuth user info: {0}".format(e))
             user = None
         else:
@@ -544,7 +547,7 @@ class AuthOAuthView(AuthView):
             else:
                 log.debug('No whitelist for OAuth provider')
             user = self.appbuilder.sm.auth_user_oauth(userinfo)
-
+            log.debug('user: {0}'.format(user));
         if user is None:
             flash(as_unicode(self.invalid_login_message), 'warning')
             return redirect('login')
